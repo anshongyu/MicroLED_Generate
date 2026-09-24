@@ -28,6 +28,7 @@ class UiUnitTests(unittest.TestCase):
             self.assertEqual(window.surface_x.value(), 35.0)
             self.assertEqual(window.surface_y.value(), 35.0)
             self.assertEqual(window.flux_threshold.value(), 0.01)
+            self.assertEqual(window.bit_depth.value(), 10)
             self.assertEqual(window.library_x_direction.text(), "1, 0, 0")
             self.assertEqual(window.library_y_direction.text(), "0, 1, 0")
         finally:
@@ -41,7 +42,7 @@ class UiUnitTests(unittest.TestCase):
             speos_directory = root / "SPEOS_RPC"
             spectrum_file.touch()
             with flux_csv.open("w", newline="", encoding="utf-8") as file:
-                csv.writer(file).writerows(((1.0, 0.5), (0.0, 1.0)))
+                csv.writer(file).writerows(((255, 128), (0, 255)))
             speos_directory.mkdir()
             window = MainWindow()
             try:
@@ -51,6 +52,7 @@ class UiUnitTests(unittest.TestCase):
                 window.pitch_y.setValue(200.0)
                 window.surface_x.setValue(50.0)
                 window.surface_y.setValue(80.0)
+                window.bit_depth.setValue(8)
                 window.lambert_spectrum.setText(str(spectrum_file))
                 window.flux_map_file.setText(str(flux_csv))
                 window.export_directory.setText(str(root))
@@ -64,6 +66,7 @@ class UiUnitTests(unittest.TestCase):
                     self.fail("Expected a SurfaceConfig from the default Surface Source UI.")
                 self.assertEqual(config.source.width_x, 0.05)
                 self.assertEqual(config.source.length_y, 0.08)
+                self.assertEqual(config.array.max_gray_code, 255)
                 self.assertEqual(config.flux_map.enabled_source_count, 3)
             finally:
                 window.close()

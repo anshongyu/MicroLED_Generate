@@ -40,6 +40,7 @@ class ArrayConfig:
     pitch_x: float
     pitch_y: float
     flux_threshold: float = 0.01
+    bit_depth: int = 10
 
     def __post_init__(self) -> None:
         if not 1 <= self.x_count <= 500:
@@ -49,46 +50,63 @@ class ArrayConfig:
         if self.pitch_x <= 0 or self.pitch_y <= 0:
             raise ValueError("X and Y pitches must be greater than 0.")
         if not 0.0 <= self.flux_threshold <= 1.0:
-            raise ValueError("Bitmap source threshold must be between 0 and 1.")
+            raise ValueError("Source threshold must be between 0 and 1.")
+        if not 1 <= self.bit_depth <= 16:
+            raise ValueError("MicroLED bit depth must be between 1 and 16.")
 
     @property
     def source_count(self) -> int:
         return self.x_count * self.y_count
 
+    @property
+    def max_gray_code(self) -> int:
+        return (1 << self.bit_depth) - 1
+
 
 @dataclass(frozen=True, slots=True)
 class FluxMapConfig:
-    """Normalized per-cell flux factors loaded from a CSV or bitmap input file."""
+    """Discrete per-cell MicroLED grayscale codes loaded from a CSV or bitmap."""
 
     input_file: Path
     matrix: FluxMap
+    max_gray_code: int
 
     @classmethod
     def load(cls, input_file: Path, array: ArrayConfig) -> "FluxMapConfig":
         suffix = input_file.suffix.lower()
         if suffix == ".csv":
-            matrix = load_flux_map(input_file, array.y_count, array.x_count)
+            matrix = load_flux_map(
+                input_file, array.y_count, array.x_count, array.max_gray_code
+            )
         elif suffix in BITMAP_SUFFIXES:
             matrix = load_bitmap_flux_map(
                 input_file,
                 array.y_count,
                 array.x_count,
+                array.max_gray_code,
             )
         else:
-            raise ValueError("Normalized flux map must be a CSV, PNG, JPEG, or BMP file.")
-        return cls(input_file=input_file, matrix=_apply_source_threshold(matrix, array.flux_threshold))
+            raise ValueError("Grayscale map must be a CSV, PNG, JPEG, or BMP file.")
+        return cls(
+            input_file=input_file,
+            matrix=_apply_source_threshold(matrix, array.flux_threshold, array.max_gray_code),
+            max_gray_code=array.max_gray_code,
+        )
 
     @property
     def enabled_source_count(self) -> int:
         return sum(value > 0 for row in self.matrix for value in row)
 
     def factor_for(self, row: int, column: int) -> float:
+        return self.code_for(row, column) / self.max_gray_code
+
+    def code_for(self, row: int, column: int) -> int:
         return self.matrix[row][column]
 
 
-def _apply_source_threshold(matrix: FluxMap, threshold: float) -> FluxMap:
+def _apply_source_threshold(matrix: FluxMap, threshold: float, max_gray_code: int) -> FluxMap:
     return tuple(
-        tuple(0.0 if value < threshold else value for value in row)
+        tuple(0 if value / max_gray_code < threshold else value for value in row)
         for row in matrix
     )
 
@@ -202,13 +220,13 @@ class GenerationConfig:
 
     def __post_init__(self) -> None:
         if self.flux_map.enabled_source_count == 0:
-            raise ValueError("Flux CSV contains no enabled cells.")
+            raise ValueError("Grayscale map contains no enabled cells.")
         if isinstance(self.source, SurfaceConfig):
             intensity = self.source.intensity
             if isinstance(intensity, LibraryIntensityConfig) and intensity.flux_from_intensity_file:
-                raise ValueError("Flux CSV requires manual luminous flux for Library intensity.")
+                raise ValueError("Grayscale maps require manual luminous flux for Library intensity.")
         elif self.source.flux_from_ray_file:
-            raise ValueError("Flux CSV requires manual luminous flux for Rayfile sources.")
+            raise ValueError("Grayscale maps require manual luminous flux for Rayfile sources.")
 
     @property
     def source_kind(self) -> SourceKind:

@@ -142,12 +142,13 @@ class SpeosGateway:
     ) -> tuple[Commitable, list[SourceSurface]]:
         root_part = lightbox.create_root_part()
         body = root_part.create_body("MicroLEDArray")
+        faces_by_code: dict[int, list[object]] = {}
         sources: list[SourceSurface] = []
         completed = 0
         for element in elements:
             self._raise_if_cancelled(cancelled)
-            flux_factor = flux_map.factor_for(element.row, element.column)
-            if flux_factor == 0.0:
+            gray_code = flux_map.code_for(element.row, element.column)
+            if gray_code == 0:
                 continue
             face = body.create_face(f"Emitter_{element.name}")
             mesh = rectangle_mesh(element.center, config.width_x, config.length_y)
@@ -155,14 +156,24 @@ class SpeosGateway:
             face.normals = list(mesh.normals)
             face.facets = list(mesh.facets)
 
-            source = lightbox.create_source(element.name, feature_type=SourceSurface)
-            source.set_exitance_constant().geometries = [(face, False)]
-            _configure_surface_source(source, config, flux_factor)
-            sources.append(source)
+            faces_by_code.setdefault(gray_code, []).append(face)
             completed += 1
             self._report_element_progress(
                 report, "build", completed, flux_map.enabled_source_count
             )
+
+        total_groups = len(faces_by_code)
+        for completed, (gray_code, faces) in enumerate(sorted(faces_by_code.items()), start=1):
+            self._raise_if_cancelled(cancelled)
+            source = lightbox.create_source(f"Gray{gray_code}", feature_type=SourceSurface)
+            source.set_exitance_constant().geometries = [(face, False) for face in faces]
+            _configure_surface_source(
+                source,
+                config,
+                gray_code / flux_map.max_gray_code * len(faces),
+            )
+            sources.append(source)
+            self._report_element_progress(report, "create grayscale sources", completed, total_groups)
         return root_part, sources
 
     @staticmethod

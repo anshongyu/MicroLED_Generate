@@ -24,20 +24,25 @@ class ConfigModelTests(unittest.TestCase):
         config = ArrayConfig(x_count=300, y_count=150, pitch_x=0.1, pitch_y=0.2)
 
         self.assertEqual(config.source_count, 45_000)
+        self.assertEqual(config.bit_depth, 10)
+        self.assertEqual(config.max_gray_code, 1023)
         with self.assertRaises(ValueError):
             ArrayConfig(x_count=501, y_count=1, pitch_x=1.0, pitch_y=1.0)
         with self.assertRaises(ValueError):
             ArrayConfig(x_count=1, y_count=1, pitch_x=1.0, pitch_y=1.0, flux_threshold=1.1)
+        with self.assertRaises(ValueError):
+            ArrayConfig(x_count=1, y_count=1, pitch_x=1.0, pitch_y=1.0, bit_depth=17)
 
     def test_flux_map_loads_normalized_values_and_counts_enabled_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             csv_file = Path(directory) / "flux.csv"
             with csv_file.open("w", newline="", encoding="utf-8") as file:
-                csv.writer(file).writerows(((1.0, 0.5), (0.0, 0.25)))
+                csv.writer(file).writerows(((1023, 512), (0, 256)))
 
             flux_map = FluxMapConfig.load(csv_file, ArrayConfig(2, 2, 1.0, 1.0))
 
-            self.assertEqual(flux_map.factor_for(0, 1), 0.5)
+            self.assertEqual(flux_map.code_for(0, 1), 512)
+            self.assertAlmostEqual(flux_map.factor_for(0, 1), 512 / 1023)
             self.assertEqual(flux_map.enabled_source_count, 3)
 
     def test_flux_map_rejects_invalid_shape_and_values(self) -> None:
@@ -47,17 +52,20 @@ class ConfigModelTests(unittest.TestCase):
             array = ArrayConfig(2, 2, 1.0, 1.0)
             with self.assertRaises(ValueError):
                 FluxMapConfig.load(csv_file, array)
+            csv_file.write_text("1024,0\n0,0\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                FluxMapConfig.load(csv_file, array)
 
     def test_csv_flux_map_uses_configurable_source_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             csv_file = Path(directory) / "flux.csv"
-            csv_file.write_text("0.05,0.2\n", encoding="utf-8")
+            csv_file.write_text("50,205\n", encoding="utf-8")
 
             kept = FluxMapConfig.load(csv_file, ArrayConfig(2, 1, 1.0, 1.0, 0.01))
             skipped = FluxMapConfig.load(csv_file, ArrayConfig(2, 1, 1.0, 1.0, 0.1))
 
-            self.assertEqual(kept.matrix, ((0.05, 0.2),))
-            self.assertEqual(skipped.matrix, ((0.0, 0.2),))
+            self.assertEqual(kept.matrix, ((50, 205),))
+            self.assertEqual(skipped.matrix, ((0, 205),))
 
     def test_png_flux_map_stretches_contrast_and_averages_grid_cells(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -68,8 +76,8 @@ class ConfigModelTests(unittest.TestCase):
 
             flux_map = FluxMapConfig.load(png_file, ArrayConfig(2, 1, 1.0, 1.0))
 
-            self.assertEqual(flux_map.matrix[0][0], 0.0)
-            self.assertAlmostEqual(flux_map.matrix[0][1], 0.75)
+            self.assertEqual(flux_map.matrix[0][0], 0)
+            self.assertEqual(flux_map.matrix[0][1], 767)
 
     def test_png_flux_map_ignores_alpha_when_computing_grayscale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -80,7 +88,7 @@ class ConfigModelTests(unittest.TestCase):
 
             flux_map = FluxMapConfig.load(png_file, ArrayConfig(2, 1, 1.0, 1.0))
 
-            self.assertEqual(flux_map.matrix, ((1.0, 0.0),))
+            self.assertEqual(flux_map.matrix, ((1023, 0),))
 
     def test_png_flux_map_rejects_images_smaller_than_grid(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -101,8 +109,8 @@ class ConfigModelTests(unittest.TestCase):
 
                 flux_map = FluxMapConfig.load(bitmap_file, ArrayConfig(2, 1, 1.0, 1.0))
 
-                self.assertEqual(flux_map.matrix[0][0], 0.0)
-                self.assertAlmostEqual(flux_map.matrix[0][1], 1.0, places=2)
+                self.assertEqual(flux_map.matrix[0][0], 0)
+                self.assertEqual(flux_map.matrix[0][1], 1023)
 
     def test_png_flux_map_maps_constant_nonblack_images_to_full_power(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -111,7 +119,7 @@ class ConfigModelTests(unittest.TestCase):
 
             flux_map = FluxMapConfig.load(png_file, ArrayConfig(2, 2, 1.0, 1.0))
 
-            self.assertEqual(flux_map.matrix, ((1.0, 1.0), (1.0, 1.0)))
+            self.assertEqual(flux_map.matrix, ((1023, 1023), (1023, 1023)))
 
     def test_png_flux_map_thresholds_low_partition_averages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -122,7 +130,7 @@ class ConfigModelTests(unittest.TestCase):
 
             flux_map = FluxMapConfig.load(png_file, ArrayConfig(2, 1, 1.0, 1.0))
 
-            self.assertEqual(flux_map.matrix, ((0.0, 0.0),))
+            self.assertEqual(flux_map.matrix, ((0, 0),))
 
     def test_png_flux_map_uses_configurable_source_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -135,8 +143,8 @@ class ConfigModelTests(unittest.TestCase):
             kept = FluxMapConfig.load(png_file, ArrayConfig(3, 1, 1.0, 1.0, 0.1))
             skipped = FluxMapConfig.load(png_file, ArrayConfig(3, 1, 1.0, 1.0, 0.3))
 
-            self.assertAlmostEqual(kept.matrix[0][1], 0.2)
-            self.assertEqual(skipped.matrix[0][1], 0.0)
+            self.assertEqual(kept.matrix[0][1], 205)
+            self.assertEqual(skipped.matrix[0][1], 0)
 
     def test_flux_map_requires_manual_rayfile_flux(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

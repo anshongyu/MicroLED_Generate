@@ -68,25 +68,32 @@ The command writes `right_turn_arrow.csv` to the project root.
 Surface rectangles use positive-Z triangle winding. Library and Rayfile orientations use their
 normalized X and Y direction vectors, with Z calculated from their cross product.
 
-## Flux Maps
+## Grayscale Maps
 
-Select a normalized flux map in the Array section. Headerless CSV and PNG, JPEG, or BMP bitmap
-images are supported.
+Set the MicroLED bit depth in the Array section, then select a grayscale map. Headerless CSV and
+PNG, JPEG, or BMP bitmap images are supported.
 Map row `r` maps to source row `Xr` and map column `c` maps to source column `Yc`; its top-left
 value maps to `X0Y0`.
 
-- A CSV must be exactly `Y source count` rows by `X source count` columns, with values from `0`
-	through `1`.
+- The maximum code is $G_{max}=2^{bitDepth}-1$. The default 10-bit setting accepts CSV codes from
+	`0` through `1023`.
+- A CSV must be exactly `Y source count` rows by `X source count` columns, with integer grayscale
+	codes from `0` through $G_{max}$.
 - A bitmap is converted to grayscale while ignoring any Alpha channel, then contrast-stretched
 	across the full image so its darkest pixel is `0` and brightest pixel is `1`.
 	Its width and height must each be at least the requested source count in that direction.
-- Each bitmap grid partition contributes its normalized grayscale average as the cell value.
-- For all map types, factors below the user-defined `Source threshold` (default `0.01`) are treated
-	as `0`.
-- A nonzero value creates the corresponding source and applies
-	$\mathrm{flux}_{cell}=\mathrm{maximum\ flux}\times\mathrm{factor}_{r,c}$.
+- Each bitmap grid partition contributes its normalized grayscale average $f$, which is quantized
+	as $G=round(fG_{max})$.
+- For all map types, codes with $G/G_{max}$ below the user-defined `Source threshold` (default
+	`0.01`) are treated as `0`.
+- In Surface mode, cells of the same nonzero code are merged into one source named `Gray{code}`.
+	Its total flux is
+	$\mathrm{flux}_{GrayG}=\mathrm{maximum\ pixel\ flux}\times G/G_{max}\times N_G$,
+	where $N_G$ is the count of cells at that code.
 - `0` leaves the cell off: no face or source is created and nothing is written to the Lightbox.
 - Map-controlled Library and Rayfile sources use manual maximum flux; flux-from-file is disabled.
+	Rayfile sources remain one source per active cell because each rayfile source has one spatial
+	axis system and cannot bind multiple array locations.
 
 ## Scale note
 

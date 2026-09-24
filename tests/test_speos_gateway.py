@@ -24,6 +24,7 @@ from microled_lightbox.speos_gateway import (
     _configure_rayfile_source,
     _configure_surface_source,
 )
+from microled_lightbox.layout import iter_array_elements
 import microled_lightbox.speos_gateway as speos_gateway
 
 
@@ -106,6 +107,34 @@ class SourceConfigurationTests(unittest.TestCase):
 
 
 class GatewayOrchestrationTests(unittest.TestCase):
+    def test_surface_array_groups_faces_and_flux_by_gray_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spectrum = root / "spectrum.spectrum"
+            csv_file = root / "gray.csv"
+            spectrum.touch()
+            _write_flux_csv(csv_file, ((1023, 512), (512, 0)))
+            array = ArrayConfig(2, 2, 2.0, 4.0)
+            flux_map = FluxMapConfig.load(csv_file, array)
+            lightbox = _FakeSurfaceLightbox()
+            config = SurfaceConfig(1.0, 1.0, LambertianConfig(3.0, 180.0, spectrum))
+
+            _, sources = SpeosGateway()._build_surface_array(
+                lightbox,
+                iter_array_elements(2, 2, 2.0, 4.0),
+                config,
+                flux_map,
+                lambda update: None,
+                lambda: False,
+            )
+
+            self.assertEqual([source.name for source in sources], ["Gray512", "Gray1023"])
+            gray_512, gray_1023 = sources
+            self.assertEqual(len(gray_512.exitance.geometries), 2)
+            self.assertEqual(len(gray_1023.exitance.geometries), 1)
+            self.assertAlmostEqual(gray_512.flux.value, 3.0 * 512 / 1023 * 2)
+            self.assertEqual(gray_1023.flux.value, 3.0)
+
     def test_generation_temporarily_disables_graphics_cache(self) -> None:
         original_graphics_value = speos_gateway.speos_general_methods._GRAPHICS_AVAILABLE
         speos = SimpleNamespace(close=Mock())
@@ -118,7 +147,7 @@ class GatewayOrchestrationTests(unittest.TestCase):
             flux_csv = root / "flux.csv"
             rpc_directory = root / "SPEOS_RPC"
             ray_file.touch()
-            _write_flux_csv(flux_csv, ((1.0,),))
+            _write_flux_csv(flux_csv, ((1023,),))
             rpc_directory.mkdir()
             config = GenerationConfig(
                 array=ArrayConfig(1, 1, 1.0, 1.0),
@@ -145,7 +174,7 @@ class GatewayOrchestrationTests(unittest.TestCase):
             flux_csv = root / "flux.csv"
             rpc_directory = root / "SPEOS_RPC"
             ray_file.touch()
-            _write_flux_csv(flux_csv, ((1.0, 0.0), (0.5, 1.0)))
+            _write_flux_csv(flux_csv, ((1023, 0), (512, 1023)))
             rpc_directory.mkdir()
             speos = SimpleNamespace(close=Mock())
             lightbox = _FakeLightbox()
@@ -169,7 +198,10 @@ class GatewayOrchestrationTests(unittest.TestCase):
                 [source.axis_system[:3] for source in lightbox.sources],
                 [[-1.0, 2.0, 0.0], [-1.0, -2.0, 0.0], [1.0, -2.0, 0.0]],
             )
-            self.assertEqual([source.flux.value for source in lightbox.sources], [2.0, 1.0, 2.0])
+            self.assertEqual(
+                [source.flux.value for source in lightbox.sources],
+                [2.0, 2.0 * 512 / 1023, 2.0],
+            )
             lightbox.commit.assert_called_once_with()
             lightbox.export.assert_called_once_with(root / "array.SPEOSLightBox")
             speos.close.assert_called_once_with()
@@ -215,6 +247,50 @@ class _FakeSurfaceSource:
             intensity_template_link=SimpleNamespace(key="intensity-guid"),
         )
         self._source_template = SimpleNamespace(surface=SimpleNamespace(intensity_guid=""))
+
+
+class _FakeFace:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.vertices: list[float] = []
+        self.normals: list[float] = []
+        self.facets: list[int] = []
+
+
+class _FakeBody:
+    def create_face(self, name: str) -> _FakeFace:
+        return _FakeFace(name)
+
+
+class _FakeRootPart:
+    def create_body(self, name: str) -> _FakeBody:
+        return _FakeBody()
+
+
+class _FakeSurfaceGeneratedSource:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.flux = SimpleNamespace(set_luminous=Mock(), value=None)
+        self.spectrum = SimpleNamespace(set_library=Mock(return_value=SimpleNamespace(file_uri=None)))
+        self.cosine = SimpleNamespace(n=None, total_angle=None)
+        self.intensity = SimpleNamespace(set_cos=Mock(return_value=self.cosine))
+        self.exitance = SimpleNamespace(geometries=[])
+
+    def set_exitance_constant(self):
+        return self.exitance
+
+
+class _FakeSurfaceLightbox:
+    def __init__(self) -> None:
+        self.sources: list[_FakeSurfaceGeneratedSource] = []
+
+    def create_root_part(self) -> _FakeRootPart:
+        return _FakeRootPart()
+
+    def create_source(self, name: str, feature_type) -> _FakeSurfaceGeneratedSource:
+        source = _FakeSurfaceGeneratedSource(name)
+        self.sources.append(source)
+        return source
 
 
 class _FakeLightbox:

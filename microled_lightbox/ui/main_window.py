@@ -75,6 +75,9 @@ class MainWindow(QMainWindow):
         self.pitch_x = _double_spin(0.001, 1_000_000.0, 40.0)
         self.pitch_y = _double_spin(0.001, 1_000_000.0, 40.0)
         self.flux_threshold = _double_spin(0.0, 1.0, 0.01)
+        self.bit_depth = QSpinBox()
+        self.bit_depth.setRange(1, 16)
+        self.bit_depth.setValue(10)
         form.addWidget(QLabel("X source count"), 0, 0)
         form.addWidget(self.x_count, 0, 1)
         form.addWidget(QLabel("Y source count"), 0, 2)
@@ -85,7 +88,7 @@ class MainWindow(QMainWindow):
         form.addWidget(self.pitch_y, 1, 3)
         self.flux_map_file = QLineEdit()
         self.flux_map_file.textChanged.connect(self._update_flux_mode_for_map)
-        form.addWidget(QLabel("Normalized flux map"), 2, 0)
+        form.addWidget(QLabel("Grayscale map (CSV or image)"), 2, 0)
         form.addWidget(
             self._file_picker(
                 self.flux_map_file,
@@ -98,6 +101,8 @@ class MainWindow(QMainWindow):
         )
         form.addWidget(QLabel("Source threshold"), 3, 0)
         form.addWidget(self.flux_threshold, 3, 1)
+        form.addWidget(QLabel("MicroLED bit depth"), 3, 2)
+        form.addWidget(self.bit_depth, 3, 3)
         self.summary = QLabel()
         self.summary.setAlignment(Qt.AlignmentFlag.AlignRight)
         form.addWidget(self.summary, 4, 0, 1, 4)
@@ -107,6 +112,7 @@ class MainWindow(QMainWindow):
             self.pitch_x,
             self.pitch_y,
             self.flux_threshold,
+            self.bit_depth,
         ):
             widget.valueChanged.connect(self._update_summary)
         return group
@@ -284,6 +290,7 @@ class MainWindow(QMainWindow):
             self.pitch_x.value() / MICROMETERS_PER_MILLIMETER,
             self.pitch_y.value() / MICROMETERS_PER_MILLIMETER,
             self.flux_threshold.value(),
+            self.bit_depth.value(),
         )
         flux_map = FluxMapConfig.load(Path(self.flux_map_file.text().strip()), array)
         source: SurfaceConfig | RayFileConfig
