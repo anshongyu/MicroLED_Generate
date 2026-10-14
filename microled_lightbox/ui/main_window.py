@@ -385,7 +385,7 @@ class MainWindow(QMainWindow):
     def _on_progress(self, update: GenerationProgress) -> None:
         if update.stage == "build" and update.total:
             value = int(update.completed / update.total * 80)
-        elif update.stage == "commit geometry":
+        elif update.stage in ("commit geometry", "commit absorber"):
             value = 80
         elif update.stage == "commit sources":
             value = 80 + int(update.completed / update.total * 10)

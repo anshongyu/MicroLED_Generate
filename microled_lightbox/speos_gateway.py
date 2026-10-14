@@ -1,6 +1,6 @@
 """Adapter that turns validated MicroLED settings into a Speos Lightbox."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -11,6 +11,10 @@ from ansys.speos.core.launcher import (  # type: ignore[import-untyped]
 )
 from ansys.speos.core.source import SourceRayFile, SourceSurface  # type: ignore[import-untyped]
 import ansys.speos.core.generic.general_methods as speos_general_methods  # type: ignore[import-untyped]
+from ansys.speos.core.generic.parameters import (  # type: ignore[import-untyped]
+    OptPropParameters,
+    SopMirrorParameters,
+)
 
 from microled_lightbox.layout import iter_array_elements, rayfile_axis_system, rectangle_mesh
 from microled_lightbox.models import (
@@ -87,7 +91,7 @@ class SpeosGateway:
             )
 
             if isinstance(config.source, SurfaceConfig):
-                root_part, surface_sources = self._build_surface_array(
+                root_part, surface_sources, active_faces = self._build_surface_array(
                     lightbox,
                     elements,
                     config.source,
@@ -96,6 +100,7 @@ class SpeosGateway:
                     cancelled,
                 )
                 self._commit_surface_geometry(root_part, report)
+                self._commit_absorber_property(lightbox, active_faces, report)
                 self._commit_surface_sources(lightbox, surface_sources, report, cancelled)
             elif self._requires_lightbox_commit(type(config.source)):
                 self._build_rayfile_array(
@@ -139,10 +144,11 @@ class SpeosGateway:
         flux_map,
         report: ProgressCallback,
         cancelled: CancelCheck,
-    ) -> tuple[Commitable, list[SourceSurface]]:
+    ) -> tuple[Commitable, list[SourceSurface], list[object]]:
         root_part = lightbox.create_root_part()
         body = root_part.create_body("MicroLEDArray")
         faces_by_code: dict[int, list[object]] = {}
+        active_faces: list[object] = []
         sources: list[SourceSurface] = []
         completed = 0
         for element in elements:
@@ -157,6 +163,7 @@ class SpeosGateway:
             face.facets = list(mesh.facets)
 
             faces_by_code.setdefault(gray_code, []).append(face)
+            active_faces.append(face)
             completed += 1
             self._report_element_progress(
                 report, "build", completed, flux_map.enabled_source_count
@@ -174,7 +181,7 @@ class SpeosGateway:
             )
             sources.append(source)
             self._report_element_progress(report, "create grayscale sources", completed, total_groups)
-        return root_part, sources
+        return root_part, sources, active_faces
 
     @staticmethod
     def _commit_surface_geometry(root_part: Commitable, report: ProgressCallback) -> None:
@@ -188,6 +195,17 @@ class SpeosGateway:
         )
         root_part.commit()
         report(GenerationProgress("commit geometry", 1, 1, "Surface geometry committed"))
+
+    @staticmethod
+    def _commit_absorber_property(lightbox, faces: Sequence[object], report: ProgressCallback) -> None:
+        report(GenerationProgress("commit absorber", 0, 1, "Creating absorbing optical property"))
+        absorber = lightbox.create_optical_property(
+            "Absorber",
+            parameters=OptPropParameters(sop_parameters=SopMirrorParameters(reflectance=0)),
+        )
+        absorber.geometries = faces
+        absorber.commit()
+        report(GenerationProgress("commit absorber", 1, 1, "Absorbing optical property committed"))
 
     def _commit_surface_sources(
         self,

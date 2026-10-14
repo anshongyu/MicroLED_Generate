@@ -119,7 +119,7 @@ class GatewayOrchestrationTests(unittest.TestCase):
             lightbox = _FakeSurfaceLightbox()
             config = SurfaceConfig(1.0, 1.0, LambertianConfig(3.0, 180.0, spectrum))
 
-            _, sources = SpeosGateway()._build_surface_array(
+            _, sources, active_faces = SpeosGateway()._build_surface_array(
                 lightbox,
                 iter_array_elements(2, 2, 2.0, 4.0),
                 config,
@@ -132,6 +132,7 @@ class GatewayOrchestrationTests(unittest.TestCase):
             gray_512, gray_1023 = sources
             self.assertEqual(len(gray_512.exitance.geometries), 2)
             self.assertEqual(len(gray_1023.exitance.geometries), 1)
+            self.assertEqual(len(active_faces), 3)
             self.assertAlmostEqual(gray_512.flux.value, 3.0 * 512 / 1023 * 2)
             self.assertEqual(gray_1023.flux.value, 3.0)
 
@@ -229,6 +230,20 @@ class GatewayOrchestrationTests(unittest.TestCase):
         root_part.commit.assert_called_once_with()
         self.assertEqual(progress[-1].stage, "commit geometry")
         self.assertEqual(progress[-1].completed, 1)
+
+    def test_absorber_property_uses_mirror_zero_on_active_faces(self) -> None:
+        absorber = SimpleNamespace(geometries=None, commit=Mock())
+        lightbox = SimpleNamespace(create_optical_property=Mock(return_value=absorber))
+        faces: list[object] = [SimpleNamespace(), SimpleNamespace()]
+        progress: list[GenerationProgress] = []
+
+        SpeosGateway()._commit_absorber_property(lightbox, faces, progress.append)
+
+        parameters = lightbox.create_optical_property.call_args.kwargs["parameters"]
+        self.assertEqual(parameters.sop_parameters.reflectance, 0)
+        self.assertEqual(absorber.geometries, faces)
+        absorber.commit.assert_called_once_with()
+        self.assertEqual(progress[-1].stage, "commit absorber")
 
 
 class _FakeRaySource:

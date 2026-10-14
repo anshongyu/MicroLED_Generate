@@ -68,6 +68,10 @@ The command writes `right_turn_arrow.csv` to the project root.
 Surface rectangles use positive-Z triangle winding. Library and Rayfile orientations use their
 normalized X and Y direction vectors, with Z calculated from their cross product.
 
+Surface arrays also add one shared `Absorber` optical property to every active emitting face. It
+uses a mirror SOP with `reflectance = 0`, making the associated faces fully absorbing outside their
+source emission behavior.
+
 ## Grayscale Maps
 
 Set the MicroLED bit depth in the Array section, then select a grayscale map. Headerless CSV and
